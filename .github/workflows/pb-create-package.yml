@@ -226,6 +226,6 @@ jobs:
               uses: docker://ghcr.io/buildpacks/actions/registry/request-add-entry:4.0.1
               with:
                 address: ghcr.io/jjeejj/buildpack-solana@${{ steps.package.outputs.digest }}
-                id: amp-buildpacks/hardhat
+                id: jjeejj/buildpack-sonala
                 token: ${{ secrets.AMP_BUILDPACKS_BOT_GITHUB_TOKEN }}
                 version: ${{ steps.version.outputs.version }}
