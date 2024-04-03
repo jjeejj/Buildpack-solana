@@ -1,4 +1,4 @@
-module github.com/amp-buildpacks/solana
+module github.com/jjeejj/Buildpack-solana
 
 go 1.21.5
 
