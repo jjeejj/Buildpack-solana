@@ -17,12 +17,12 @@ jobs:
         steps:
             - name: Docker login ghcr.io
               if: ${{ (github.event_name != 'pull_request' || ! github.event.pull_request.head.repo.fork) && (github.actor != 'dependabot[bot]') }}
-              uses: docker/login-action@v2
+              uses: docker/login-action@v3
               with:
                 password: ${{ secrets.AMP_BUILDPACKS_BOT_GITHUB_TOKEN }}
                 registry: ghcr.io
                 username: ${{ github.actor }}
-            - uses: actions/setup-go@v4
+            - uses: actions/setup-go@v5
               with:
                 go-version: "1.20"
             - name: Install create-package
@@ -35,22 +35,17 @@ jobs:
             - name: Install pack
               run: |
                 #!/usr/bin/env bash
-
+                # this is coming from a copy of https://github.com/buildpacks/pack/actions/runs/8118576298 stored on box
+                # TODO to revisit when the official one is out
                 set -euo pipefail
 
-                echo "Installing pack ${PACK_VERSION}"
+                echo "Installing pack experimental"
 
                 mkdir -p "${HOME}"/bin
                 echo "${HOME}/bin" >> "${GITHUB_PATH}"
 
-                curl \
-                  --location \
-                  --show-error \
-                  --silent \
-                  "https://github.com/buildpacks/pack/releases/download/v${PACK_VERSION}/pack-v${PACK_VERSION}-linux.tgz" \
-                | tar -C "${HOME}"/bin -xz pack
-              env:
-                PACK_VERSION: 0.29.0
+                curl -L "https://ent.box.com/shared/static/j4d1bfe9uk1sb0i7zjvci0md9xmy41u4" -o ${HOME}/bin/pack
+                chmod +x "${HOME}"/bin/pack
             - name: Enable pack Experimental
               if: ${{ false }}
               run: |
@@ -62,8 +57,8 @@ jobs:
 
                 mkdir -p "${HOME}"/.pack
                 echo "experimental = true" >> "${HOME}"/.pack/config.toml
-            - uses: actions/checkout@v3
-            - uses: actions/cache@v3
+            - uses: actions/checkout@v4
+            - uses: actions/cache@v4
               with:
                 key: ${{ runner.os }}-go-${{ hashFiles('**/buildpack.toml', '**/package.toml') }}
                 path: |-
@@ -77,8 +72,8 @@ jobs:
 
                 set -euo pipefail
 
-                if [ -z "${GITHUB_REF+set}" ]; then
-                  echo "GITHUB_REF set to [${GITHUB_REF-<unset>}], but should never be empty or unset"
+                if [[ ${GITHUB_REF:-} != "refs/"* ]]; then
+                  echo "GITHUB_REF set to [${GITHUB_REF:-}], but that is unexpected. It should start with 'refs/*'"
                   exit 255
                 fi
 
@@ -116,21 +111,23 @@ jobs:
 
                 if [[ "${INCLUDE_DEPENDENCIES}" == "true" ]]; then
                   create-package \
-                    --source ${SOURCE_PATH:-.} \
+                    --source "${SOURCE_PATH:-.}" \
                     --cache-location "${HOME}"/carton-cache \
                     --destination "${HOME}"/buildpack \
                     --include-dependencies \
                     --version "${VERSION}"
                 else
                   create-package \
-                    --source ${SOURCE_PATH:-.} \
+                    --source "${SOURCE_PATH:-.}" \
                     --destination "${HOME}"/buildpack \
                     --version "${VERSION}"
                 fi
 
-                PACKAGE_FILE=${SOURCE_PATH:-.}/package.toml
-                [[ -e ${PACKAGE_FILE} ]] && cp ${PACKAGE_FILE} "${HOME}"/package.toml
-                printf '[buildpack]\nuri = "%s"\n\n[platform]\nos = "%s"\n' "${HOME}"/buildpack "${OS}" >> "${HOME}"/package.toml
+                PACKAGE_FILE="${SOURCE_PATH:-.}/package.toml"
+                if [ -f "${PACKAGE_FILE}" ]; then
+                  cp "${PACKAGE_FILE}" "${HOME}/buildpack/package.toml"
+                  printf '[buildpack]\nuri = "%s"\n\n[platform]\nos = "%s"\n' "${HOME}/buildpack" "${OS}" >> "${HOME}/buildpack/package.toml"
+                fi
               env:
                 INCLUDE_DEPENDENCIES: "true"
                 OS: linux
@@ -141,15 +138,23 @@ jobs:
 
                 set -euo pipefail
 
+                COMPILED_BUILDPACK="${HOME}/buildpack"
+
+                # create-package puts the buildpack here, we need to run from that directory
+                #   for component buildpacks so that pack doesn't need a package.toml
+                cd "${COMPILED_BUILDPACK}"
+                CONFIG=""
+                if [ -f "${COMPILED_BUILDPACK}/package.toml" ]; then
+                  CONFIG="--config ${COMPILED_BUILDPACK}/package.toml"
+                fi
 
                 PACKAGE_LIST=($PACKAGES)
                 # Extract first repo (Docker Hub) as the main to package & register
                 PACKAGE=${PACKAGE_LIST[0]}
 
                 if [[ "${PUBLISH:-x}" == "true" ]]; then
-                  pack buildpack package \
-                    "${PACKAGE}:${VERSION}" \
-                    --config "${HOME}"/package.toml \
+                  pack -v buildpack package \
+                    "${PACKAGE}:${VERSION}" ${CONFIG} \
                     --publish
 
                   if [[ -n ${VERSION_MINOR:-} && -n ${VERSION_MAJOR:-} ]]; then
@@ -173,9 +178,8 @@ jobs:
                     done
 
                 else
-                  pack buildpack package \
-                    "${PACKAGE}:${VERSION}" \
-                    --config "${HOME}"/package.toml \
+                  pack -v buildpack package \
+                    "${PACKAGE}:${VERSION}" ${CONFIG} \
                     --format "${FORMAT}"
                 fi
               env:
@@ -187,13 +191,13 @@ jobs:
         runs-on:
             - ubuntu-latest
         steps:
-            - uses: actions/checkout@v3
-            - uses: actions/cache@v3
+            - uses: actions/checkout@v4
+            - uses: actions/cache@v4
               with:
                 key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
                 path: ${{ env.HOME }}/go/pkg/mod
                 restore-keys: ${{ runner.os }}-go-
-            - uses: actions/setup-go@v4
+            - uses: actions/setup-go@v5
               with:
                 go-version: "1.20"
             - name: Install richgo
